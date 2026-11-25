@@ -54,8 +54,11 @@ Quick workouts start empty. Their picker offers saved routine exercise names and
 | --- | --- |
 | Swift syntax for all application, XCTest, and UI-test source files | Parsed on Windows with the tree-sitter Swift grammar |
 | XcodeGen YAML, target versions, source paths, plist XML, and GitHub Actions YAML and shell syntax | Checked on Windows |
-| XcodeGen generation, Swift type-checking, iOS linking, GitHub Actions artifact, Simulator layout, and XCTest execution | Awaiting a GitHub runner or Mac with Xcode |
+| XcodeGen generation, Swift type-checking, iOS linking, and unsigned IPA packaging | Passed on the macOS runner |
+| Eight journal tests, terminate-and-relaunch recovery, and 375 × 667 pt workout layout | Passed on the iPhone SE (3rd generation) simulator running iOS 26.5 |
 | Sideloadly installation, App Switcher force-quit, Spotify IPC, URL handoff, downloaded playback, audio continuity, and haptics | Awaiting a physical iPhone 8 |
+
+The workflow packages an iOS 16.0 ARM64 build and runs the simulator tests in a separate job. [Verified GitHub Actions run](https://github.com/sxrdala/gym/actions/runs/45535772411)
 
 ### Automated tests
 
