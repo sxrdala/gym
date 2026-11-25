@@ -55,6 +55,7 @@ struct PrimaryButton: View {
             .frame(maxWidth: .infinity, minHeight: 54)
             .background(Style.mint, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .foregroundStyle(.black)
+            .contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityLabel(title)
     }
 }

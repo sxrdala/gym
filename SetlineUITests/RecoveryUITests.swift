@@ -75,8 +75,12 @@ final class RecoveryUITests: XCTestCase {
         XCTAssertTrue(choose.waitForExistence(timeout: 5))
         choose.tap()
         app.buttons["Empty quick workout"].tap()
-        app.buttons["Choose exercise"].tap()
-        app.buttons["Bench press"].tap()
+        let chooseExercise = app.buttons["Choose exercise"]
+        XCTAssertTrue(chooseExercise.waitForExistence(timeout: 5))
+        chooseExercise.tap()
+        let bench = app.buttons["Bench press"]
+        XCTAssertTrue(bench.waitForExistence(timeout: 5), app.debugDescription)
+        bench.tap()
         XCTAssertTrue(app.buttons["Log Set"].waitForExistence(timeout: 5))
     }
 
