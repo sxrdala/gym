@@ -42,7 +42,7 @@ jobs:
           app="build/Build/Products/Release-iphoneos/Setline.app"
           test "$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$app/Info.plist")" = "16.0"
           executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Info.plist")"
-          xcrun lipo -verify_arch arm64 "$app/$executable"
+          xcrun lipo "$app/$executable" -verify_arch arm64
           mkdir -p build/ipa/Payload
           ditto "$app" build/ipa/Payload/Setline.app
           ditto -c -k --keepParent build/ipa/Payload build/Setline.ipa
