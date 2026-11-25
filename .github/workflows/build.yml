@@ -1,0 +1,57 @@
+name: Build Setline IPA
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate Xcode project
+        run: |
+          xcodebuild -version
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Resolve Swift packages
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project Setline.xcodeproj -scheme Setline -derivedDataPath build
+
+      - name: Build unsigned iPhone app
+        run: |
+          xcodebuild -project Setline.xcodeproj \
+            -scheme Setline \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package and verify IPA
+        run: |
+          app="build/Build/Products/Release-iphoneos/Setline.app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$app/Info.plist")" = "16.0"
+          executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Info.plist")"
+          xcrun lipo -verify_arch arm64 "$app/$executable"
+          mkdir -p build/ipa/Payload
+          ditto "$app" build/ipa/Payload/Setline.app
+          ditto -c -k --keepParent build/ipa/Payload build/Setline.ipa
+          unzip -tq build/Setline.ipa
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Setline-unsigned
+          path: build/Setline.ipa
+          if-no-files-found: error
+          compression-level: 0

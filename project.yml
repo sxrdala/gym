@@ -1,0 +1,64 @@
+name: Setline
+options:
+  deploymentTarget:
+    iOS: "16.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    TARGETED_DEVICE_FAMILY: "1"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+packages:
+  SpotifySDK:
+    url: https://github.com/spotify/ios-sdk.git
+    revision: 0b3e54771738ad5e64f22c8e5e19ca76d6becc6c
+targets:
+  Setline:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: Setline
+        excludes: [Info.plist]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.setline
+        INFOPLIST_FILE: Setline/Info.plist
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: "1.0"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SPOTIFY_CLIENT_ID: "97c47cb88d76499ea7d0047b0bc01d45"
+        OTHER_LDFLAGS: "$(inherited) -ObjC"
+        SUPPORTS_MACCATALYST: NO
+    dependencies:
+      - package: SpotifySDK
+        product: SpotifyiOS
+  SetlineTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources: [SetlineTests]
+    dependencies:
+      - target: Setline
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.setline.tests
+  SetlineUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources: [SetlineUITests]
+    dependencies:
+      - target: Setline
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.setline.uitests
+        TEST_TARGET_NAME: Setline
+schemes:
+  Setline:
+    build:
+      targets:
+        Setline: all
+    test:
+      targets: [SetlineTests, SetlineUITests]
