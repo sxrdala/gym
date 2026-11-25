@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct SpotifyBar: View {
-    @EnvironmentObject private var music
+    @EnvironmentObject private var music: SpotifyManager
     @State private var setup = false
 
     var body: some View {
@@ -38,7 +38,7 @@ struct SpotifyBar: View {
 }
 
 struct SpotifySetup: View {
-    @EnvironmentObject private var music
+    @EnvironmentObject private var music: SpotifyManager
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {

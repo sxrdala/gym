@@ -3,7 +3,8 @@ import UIKit
 @preconcurrency import SpotifyiOS
 
 @MainActor
-final class SpotifyManager: NSObject, ObservableObject, SPTAppRemoteDelegate, SPTAppRemotePlayerStateDelegate {
+final class SpotifyManager: NSObject, ObservableObject,
+    @preconcurrency SPTAppRemoteDelegate, @preconcurrency SPTAppRemotePlayerStateDelegate {
     enum State: Equatable {
         case unconfigured, disconnected, connecting, connected, offlineUnavailable
     }
@@ -50,9 +51,13 @@ final class SpotifyManager: NSObject, ObservableObject, SPTAppRemoteDelegate, SP
         awaitingReturn = true
         state = .connecting
         startTimeout()
-        transport.authorizeAndPlayURI("") { [weak self, weak transport] launched in
-            guard let self, let transport, self.remote === transport, !launched else { return }
-            self.reset(to: .offlineUnavailable)
+        let attempt = ObjectIdentifier(transport)
+        transport.authorizeAndPlayURI("") { [weak self] launched in
+            guard !launched else { return }
+            Task { @MainActor in
+                guard let self, let current = self.remote, ObjectIdentifier(current) == attempt else { return }
+                self.reset(to: .offlineUnavailable)
+            }
         }
     }
 
