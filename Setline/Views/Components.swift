@@ -6,7 +6,7 @@ enum Style {
     static let card = Color(white: 0.075)
     static let line = Color(white: 0.17)
     static let muted = Color(white: 0.67)
-    static let motion = Animation.spring(response: 0.28, dampingFraction: 0.82)
+    static let motion = Animation.spring(response: 0.32, dampingFraction: 0.82)
 }
 
 extension View {
@@ -31,7 +31,7 @@ extension View {
     }
 
     func reporting(_ failure: Binding<String?>) -> some View {
-        alert("Couldn’t complete that change", isPresented: Binding(
+        alert("Save error", isPresented: Binding(
             get: { failure.wrappedValue != nil },
             set: { if !$0 { failure.wrappedValue = nil } }
         )) { Button("OK") { failure.wrappedValue = nil } } message: {

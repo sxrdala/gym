@@ -1,4 +1,5 @@
 """Generate the GymBlox iOS icon. Requires Pillow."""
+import json
 from math import cos, sin, tau
 from pathlib import Path
 
@@ -7,7 +8,7 @@ from PIL import Image, ImageDraw, ImageFilter
 SIZE = 1024
 SCALE = 2
 OUTPUT = (Path(__file__).resolve().parents[1] / "Setline" / "Assets.xcassets"
-          / "AppIcon.appiconset" / "AppIcon.png")
+          / "AppIcon.appiconset")
 
 
 def project(x, y, z):
@@ -68,7 +69,17 @@ def main():
     plate(draw, -4.05, 1.10, dark_blue)
     block(draw, (-4.65, -.49, -.49), (-4.5, .49, .49), "#9affda", "#36dfab", "#07967d")
 
-    image.resize((SIZE, SIZE), Image.Resampling.LANCZOS).save(OUTPUT, optimize=True)
+    OUTPUT.mkdir(parents=True, exist_ok=True)
+    slots = [(size, scale, "iphone") for size in (20, 29, 40, 60) for scale in (2, 3)]
+    slots.append((1024, 1, "ios-marketing"))
+    images = []
+    for size, scale, idiom in slots:
+        pixels = size * scale
+        filename = "AppIcon.png" if idiom == "ios-marketing" else f"AppIcon-{size}@{scale}x.png"
+        image.resize((pixels, pixels), Image.Resampling.LANCZOS).save(OUTPUT / filename, optimize=True)
+        images.append(dict(filename=filename, idiom=idiom, size=f"{size}x{size}", scale=f"{scale}x"))
+    catalog = dict(images=images, info=dict(author="xcode", version=1))
+    (OUTPUT / "Contents.json").write_text(json.dumps(catalog, indent=2) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

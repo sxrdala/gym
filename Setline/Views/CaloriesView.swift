@@ -1,197 +1,262 @@
 import SwiftUI
 
-private enum NutritionEditor: String, Identifiable {
-    case quick = "Quick add"
-    case meal = "Create custom meal"
-    case goals = "Daily goals"
+enum NutritionStyle {
+    static let calories = Color(red: 1, green: 59 / 255, blue: 48 / 255)
+    static let protein = Color(red: 52 / 255, green: 199 / 255, blue: 89 / 255)
+    static let carbs = Color(red: 0, green: 122 / 255, blue: 1)
+    static let fats = Color(red: 1, green: 204 / 255, blue: 0)
+}
+
+private enum DietPage: String, CaseIterable { case food = "Food", cardio = "Cardio" }
+private enum DietEditor: String, Identifiable {
+    case quick = "Quick add", meal = "New meal", cardio = "Log cardio"
     var id: Self { self }
 }
 
 struct CaloriesView: View {
     @EnvironmentObject private var journal: Journal
-    @State private var editor: NutritionEditor?
+    @EnvironmentObject private var tracker: StepTracker
+    @State private var page = DietPage.food
+    @State private var editor: DietEditor?
     @State private var failure: String?
+    @Namespace private var selection
     private var day: Date { journal.selectedDay }
     private var daily: DailyNutrition { journal.nutrition(on: day) }
+    private var activity: DailyActivity { journal.activity(on: day) }
 
     var body: some View {
         List {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    Text(day.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
-                        .font(.headline.monospacedDigit())
-                    Spacer()
-                    IconControl(title: "Edit daily goals", icon: "slider.horizontal.3") { editor = .goals }
-                }
-                NutritionSummary(consumed: daily.consumed, goals: daily.goals)
-            }.panel().panelRow()
-            HStack {
-                SectionTitle(text: "Food log")
-                Button { editor = .quick } label: { Label("Quick add", systemImage: "plus").frame(minHeight: 44) }
-            }.panelRow()
-            if daily.entries.isEmpty {
-                Text("No food logged for this day.").font(.subheadline).foregroundStyle(Style.muted).panelRow()
-            }
-            ForEach(FoodPeriod.allCases, id: \.self) { period in
-                let entries = daily.entries.filter { FoodPeriod.at($0.loggedAt) == period }
-                    .sorted { $0.loggedAt < $1.loggedAt }
-                if !entries.isEmpty {
-                    Text(period.rawValue).font(.caption.bold()).foregroundStyle(Style.muted).panelRow()
-                    ForEach(entries) { entry in
-                        HStack(alignment: .firstTextBaseline) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(entry.meal.name).font(.headline)
-                                Text(entry.loggedAt, style: .time).font(.caption).foregroundStyle(Style.muted)
+            HStack(spacing: 0) {
+                ForEach(DietPage.allCases, id: \.self) { item in
+                    Button {
+                        withAnimation(Style.motion) { page = item }; Haptics.tap()
+                    } label: {
+                        Text(item.rawValue).font(.subheadline.bold()).frame(maxWidth: .infinity, minHeight: 44)
+                            .foregroundStyle(page == item ? .black : .white)
+                            .background {
+                                if page == item { Capsule().fill(Style.mint).matchedGeometryEffect(id: "page", in: selection) }
                             }
-                            Spacer()
-                            Text("\(entry.meal.nutrients.calories) kcal").font(.subheadline.monospacedDigit())
-                        }.panel().panelRow().swipeActions {
-                            Button("Delete", role: .destructive) {
-                                do { try journal.deleteFood(entry.id, on: day) }
-                                catch { failure = error.localizedDescription }
-                            }
-                        }
-                    }
+                    }.buttonStyle(.plain).accessibilityAddTraits(page == item ? .isSelected : [])
                 }
-            }
-            HStack {
-                SectionTitle(text: "Custom meals")
-                IconControl(title: "Create custom meal", icon: "plus") { editor = .meal }
-            }.panelRow()
-            if journal.snapshot.meals.isEmpty {
-                Button("Create your first meal") { editor = .meal }.frame(minHeight: 44).panelRow()
-            }
-            ForEach(journal.snapshot.meals) { meal in
-                Button {
-                    do { try journal.logMeal(meal, on: day); Haptics.success() }
-                    catch { failure = error.localizedDescription }
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(meal.name).font(.headline)
-                            Text("\(meal.nutrients.calories) kcal").font(.caption.monospacedDigit()).foregroundStyle(Style.muted)
-                        }
-                        Spacer()
-                        Image(systemName: "plus.circle.fill").foregroundStyle(Style.mint)
-                    }.frame(minHeight: 44).contentShape(Rectangle())
-                }.buttonStyle(.plain).accessibilityLabel("Log \(meal.name)").panel().panelRow()
-            }
-        }
-        .listSurface().navigationTitle("Calories").navigationBarTitleDisplayMode(.inline)
-        .sheet(item: $editor) { mode in
-            NutritionForm(mode: mode, goals: daily.goals) { name, nutrients in
-                let meal = Meal(name: name, nutrients: nutrients)
-                switch mode {
-                case .quick: try journal.logMeal(meal, on: day)
-                case .meal: try journal.saveMeal(meal)
-                case .goals: try journal.saveGoals(nutrients, on: day)
-                }
-            }
-        }
-        .reporting($failure)
+            }.background(Style.card, in: Capsule()).panelRow()
+            DayStrip { date in change { try journal.selectDay(date) } }.panelRow()
+            if page == .food { food } else { cardio }
+        }.listSurface().navigationTitle("Diet").navigationBarTitleDisplayMode(.inline)
+            .monospacedDigit()
+            .sheet(item: $editor) { mode in
+                if mode == .cardio { CardioForm(day: day) }
+                else { MealForm(day: day, library: mode == .meal) }
+            }.reporting($failure)
     }
-}
 
-private enum FoodPeriod: String, CaseIterable {
-    case morning = "Morning", afternoon = "Afternoon", evening = "Evening"
-    static func at(_ time: Date) -> Self {
-        switch TrainingDay.calendar.component(.hour, from: time) {
-        case 0..<12: return .morning
-        case 12..<18: return .afternoon
-        default: return .evening
-        }
-    }
-}
-
-private struct NutritionSummary: View {
-    let consumed: Nutrients
-    let goals: Nutrients
-
-    var body: some View {
-        let remaining = goals.calories - consumed.calories
+    @ViewBuilder private var food: some View {
         VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("\(consumed.calories) / \(goals.calories) kcal").font(.title2.bold())
-                Text("\(abs(remaining)) kcal \(remaining < 0 ? "over target" : "remaining")")
-                    .font(.subheadline).foregroundStyle(Style.muted)
+            NetCalories(value: journal.netCalories(on: day))
+            bar("🔥 Consumed", daily.consumed.calories, daily.goals.calories, "kcal", NutritionStyle.calories)
+            bar("🥩 Protein", daily.consumed.protein, daily.goals.protein, "g", NutritionStyle.protein)
+            bar("🍚 Carbs", daily.consumed.carbs, daily.goals.carbs, "g", NutritionStyle.carbs)
+            bar("🥑 Fats", daily.consumed.fats, daily.goals.fats, "g", NutritionStyle.fats)
+        }.panel().panelRow()
+        header("Custom meals", "New meal", .meal)
+        ForEach(journal.snapshot.meals) { meal in
+            Button { change { try journal.logMeal(meal, on: day) } } label: {
+                HStack {
+                    Text(meal.name); Spacer(); kcal(meal.nutrients.calories)
+                    Image(systemName: "plus.circle.fill")
+                }.contentShape(Rectangle()).frame(minHeight: 44)
+            }.buttonStyle(.plain).panelRow()
+        }
+        header("Food log", "Quick add", .quick)
+        ForEach(daily.entries.sorted { $0.loggedAt > $1.loggedAt }) { entry in
+            HStack {
+                VStack(alignment: .leading) {
+                    Text(entry.meal.name)
+                    Text(entry.loggedAt, style: .time).font(.caption).foregroundStyle(Style.muted)
+                }
+                Spacer(); kcal(entry.meal.nutrients.calories)
+            }.panel().panelRow().swipeActions {
+                Button("Delete", role: .destructive) { change { try journal.deleteFood(entry.id, on: day) } }
             }
-            bar(consumed.calories, goals.calories, Style.mint).accessibilityLabel("Calorie progress")
-            macro("Protein", consumed.protein, goals.protein, Style.mint)
-            macro("Carbs", consumed.carbs, goals.carbs, Style.blue)
-            macro("Fats", consumed.fats, goals.fats, .orange)
-        }.monospacedDigit()
+        }
     }
 
-    private func macro(_ label: String, _ value: Int, _ goal: Int, _ color: Color) -> some View {
+    @ViewBuilder private var cardio: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            LabeledContent("🔥 Burned", value: "\(activity.burned) kcal").font(.headline).foregroundStyle(NutritionStyle.calories)
+            let steps = activity.steps
+            HStack {
+                Label("Steps", systemImage: "figure.walk")
+                Spacer()
+                Text("\(steps.map { String($0.count) } ?? "—") / \(journal.snapshot.profile.stepGoal)")
+            }
+            ProgressView(value: Double(min(steps?.count ?? 0, journal.snapshot.profile.stepGoal)),
+                         total: Double(journal.snapshot.profile.stepGoal))
+                .tint(Style.mint).animation(Style.motion, value: steps?.count)
+            if let steps { kcal(steps.calories) }
+            if let message = tracker.status { Text(message).font(.caption).foregroundStyle(Style.muted) }
+        }.panel().panelRow()
+        header("Sessions", "Log cardio", .cardio)
+        ForEach(activity.sessions.reversed()) { session in
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(session.name)
+                    Text("\(session.minutes) min · \(session.met.formatted()) MET").font(.caption).foregroundStyle(Style.muted)
+                }
+                Spacer(); kcal(session.calories)
+            }.panel().panelRow().swipeActions {
+                Button("Delete", role: .destructive) { change { try journal.deleteCardio(session.id, on: day) } }
+            }
+        }
+    }
+
+    private func header(_ title: String, _ action: String, _ mode: DietEditor) -> some View {
+        HStack { SectionTitle(text: title); IconControl(title: action, icon: "plus") { editor = mode } }.panelRow()
+    }
+
+    private func kcal(_ value: Int) -> some View {
+        Text("🔥 \(value) kcal").font(.subheadline).foregroundStyle(NutritionStyle.calories)
+    }
+
+    private func bar(_ name: String, _ value: Int, _ goal: Int, _ unit: String, _ color: Color) -> some View {
         VStack(spacing: 4) {
-            HStack { Text(label); Spacer(); Text("\(value) / \(goal) g") }.font(.caption.weight(.medium))
-            bar(value, goal, color)
+            HStack { Text(name); Spacer(); Text("\(value) / \(goal) \(unit)") }.font(.caption.bold()).foregroundStyle(color)
+            ProgressView(value: Double(min(value, goal)), total: Double(max(1, goal)))
+                .tint(color).animation(Style.motion, value: value).animation(Style.motion, value: goal)
         }.accessibilityElement(children: .combine)
     }
 
-    private func bar(_ value: Int, _ goal: Int, _ color: Color) -> some View {
-        ProgressView(value: Double(min(value, goal)), total: Double(max(1, goal)))
-            .progressViewStyle(.linear).tint(color)
+    private func change(_ action: () throws -> Void) {
+        do { try action(); Haptics.tap() } catch { failure = error.localizedDescription }
     }
 }
 
-private struct NutritionForm: View {
-    let mode: NutritionEditor
-    let save: (String, Nutrients) throws -> Void
-    @Environment(\.dismiss) private var dismiss
-    @State private var name = ""
-    @State private var calories: String
-    @State private var protein: String
-    @State private var carbs: String
-    @State private var fats: String
-    @State private var failure: String?
-
-    init(mode: NutritionEditor, goals: Nutrients, save: @escaping (String, Nutrients) throws -> Void) {
-        self.mode = mode
-        self.save = save
-        _calories = State(initialValue: mode == .goals ? String(goals.calories) : "")
-        _protein = State(initialValue: mode == .goals ? String(goals.protein) : "")
-        _carbs = State(initialValue: mode == .goals ? String(goals.carbs) : "")
-        _fats = State(initialValue: mode == .goals ? String(goals.fats) : "")
+struct NetCalories: View {
+    let value: Int
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("🔥 Net calories").font(.subheadline)
+            Text("\(value) kcal").font(.title.bold()).monospacedDigit()
+        }.foregroundStyle(NutritionStyle.calories).accessibilityElement(children: .combine)
     }
+}
+
+struct NumberField: View {
+    let label: String
+    @Binding var text: String
+    var decimal = false
+    var color: Color = .primary
+
+    var body: some View {
+        HStack {
+            Text(label).foregroundStyle(color)
+            Spacer()
+            TextField("0", text: $text).accessibilityLabel(label).monospacedDigit()
+                .keyboardType(decimal ? .decimalPad : .numberPad).multilineTextAlignment(.trailing)
+        }
+    }
+}
+
+struct NutrientFields: View {
+    @Binding var calories: String
+    @Binding var protein: String
+    @Binding var carbs: String
+    @Binding var fats: String
+
+    var body: some View {
+        NumberField(label: "🔥 kcal", text: $calories, color: NutritionStyle.calories)
+        NumberField(label: "🥩 Protein (g)", text: $protein, color: NutritionStyle.protein)
+        NumberField(label: "🍚 Carbs (g)", text: $carbs, color: NutritionStyle.carbs)
+        NumberField(label: "🥑 Fats (g)", text: $fats, color: NutritionStyle.fats)
+    }
+}
+
+private struct MealForm: View {
+    @EnvironmentObject private var journal: Journal
+    @Environment(\.dismiss) private var dismiss
+    let day: Date
+    let library: Bool
+    @State private var name = ""
+    @State private var calories = ""
+    @State private var protein = ""
+    @State private var carbs = ""
+    @State private var fats = ""
+    @State private var failure: String?
 
     var body: some View {
         NavigationStack {
             Form {
-                if mode != .goals { TextField(mode == .quick ? "Food name (optional)" : "Meal name", text: $name) }
-                field("Calories", "kcal", $calories)
-                field("Protein", "g", $protein)
-                field("Carbs", "g", $carbs)
-                field("Fats", "g", $fats)
-            }.navigationTitle(mode.rawValue).navigationBarTitleDisplayMode(.inline)
+                TextField("Meal name", text: $name)
+                NutrientFields(calories: $calories, protein: $protein, carbs: $carbs, fats: $fats)
+            }.navigationTitle(library ? "New meal" : "Quick add").navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                     ToolbarItem(placement: .confirmationAction) {
-                        Button(mode == .quick ? "Log" : "Save", action: commit)
-                            .disabled(mode == .meal && name.trimmed.isEmpty)
+                        Button(library ? "Save" : "Log", action: save)
+                            .disabled((library && name.trimmed.isEmpty) || [calories, protein, carbs, fats].allSatisfy(\.isEmpty))
                     }
                 }.reporting($failure)
         }
     }
 
-    private func field(_ label: String, _ unit: String, _ value: Binding<String>) -> some View {
-        HStack {
-            Text(label)
-            Spacer()
-            TextField("0", text: value).keyboardType(.numberPad).multilineTextAlignment(.trailing)
-                .accessibilityLabel("\(label) in \(unit)")
-            Text(unit).foregroundStyle(Style.muted)
+    private func save() {
+        func number(_ text: String) -> Int? { text.isEmpty ? 0 : Int(text) }
+        guard let kcal = number(calories), let p = number(protein), let c = number(carbs), let f = number(fats)
+        else { failure = JournalError.nutrients.localizedDescription; return }
+        let meal = Meal(name: name.trimmed.isEmpty ? "Quick add" : name.trimmed,
+                        nutrients: Nutrients(calories: kcal, protein: p, carbs: c, fats: f))
+        do {
+            if library { try journal.saveMeal(meal) } else { try journal.logMeal(meal, on: day) }
+            Haptics.success(); dismiss()
+        } catch { failure = error.localizedDescription }
+    }
+}
+
+private enum CardioType: String, CaseIterable {
+    case run = "Running", walk = "Incline Walk", ride = "Cycling", spar = "Sparring", custom = "Custom"
+    var met: String {
+        switch self {
+        case .run: return "8"
+        case .walk: return "5"
+        case .ride: return "7"
+        case .spar: return "9"
+        case .custom: return "4"
         }
     }
+}
 
-    private func commit() {
-        let strings = [calories, protein, carbs, fats]
-        let values = strings.map { value in value.isEmpty && mode != .goals ? 0 : Int(value) }
-        guard let kcal = values[0], let p = values[1], let c = values[2], let f = values[3],
-              !strings.allSatisfy(\.isEmpty) else { failure = JournalError.nutrients.localizedDescription; return }
-        do {
-            try save(name.trimmed.isEmpty ? "Quick add" : name.trimmed, Nutrients(calories: kcal, protein: p, carbs: c, fats: f))
-            dismiss()
-        } catch { failure = error.localizedDescription }
+private struct CardioForm: View {
+    @EnvironmentObject private var journal: Journal
+    @Environment(\.dismiss) private var dismiss
+    let day: Date
+    @State private var type = CardioType.run
+    @State private var name = ""
+    @State private var minutes = "30"
+    @State private var met = CardioType.run.met
+    @State private var failure: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Picker("Activity", selection: $type) {
+                    ForEach(CardioType.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }.onChange(of: type) { met = $0.met }
+                if type == .custom { TextField("Activity name", text: $name) }
+                NumberField(label: "Minutes", text: $minutes)
+                NumberField(label: "Intensity (MET)", text: $met, decimal: true)
+            }.navigationTitle("Log cardio").navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Log") {
+                            do {
+                                guard let duration = Int(minutes), let intensity = Double(met.replacingOccurrences(of: ",", with: "."))
+                                else { throw JournalError.invalid }
+                                try journal.logCardio(type == .custom ? name : type.rawValue, minutes: duration, met: intensity, on: day)
+                                Haptics.success(); dismiss()
+                            } catch { failure = error.localizedDescription }
+                        }
+                    }
+                }.reporting($failure)
+        }
     }
 }

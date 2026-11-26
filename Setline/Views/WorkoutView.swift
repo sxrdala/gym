@@ -3,222 +3,147 @@ import SwiftUI
 struct WorkoutView: View {
     @EnvironmentObject private var journal: Journal
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.dynamicTypeSize) private var typeSize
     let sessionID: UUID
     @State private var adding = false
     @State private var finishing = false
+    @State private var collapsed: Set<UUID> = []
     @State private var editing: LoggedSet?
     @State private var failure: String?
 
     var body: some View {
         if let session = journal.workout(sessionID) {
-            content(session)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        ForEach(session.ordered) { lift in
+                            card(lift, in: session).id(lift.id)
+                        }
+                    }.padding(14)
+                }.onChange(of: session.selectedLiftID) { id in
+                    if let id { withAnimation(Style.motion) { proxy.scrollTo(id, anchor: .top) } }
+                }
+            }
+            .navigationTitle(session.routineName).navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
+                if session.isActive {
+                    ToolbarItem(placement: .confirmationAction) { Button("Finish") { finishing = true } }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                if session.isActive {
+                    PrimaryButton(title: "Add exercise", icon: "plus") { adding = true }
+                        .padding(.horizontal, 16).padding(.vertical, 6).background(Color.black)
+                }
+            }
+            .sheet(isPresented: $adding) { ExercisePicker(sessionID: sessionID) }
+            .sheet(item: $editing) { entry in
+                if let lift = session.lifts.first(where: { $0.id == entry.liftID }) {
+                    EditSetSheet(entry: entry, lift: lift, sessionID: sessionID)
+                }
+            }
+            .confirmationDialog("Finish workout?", isPresented: $finishing, titleVisibility: .visible) {
+                Button("Finish workout") { change { try journal.finish(sessionID); dismiss() } }
+                Button("Cancel", role: .cancel) {}
+            }.reporting($failure)
         }
     }
 
-    private func content(_ session: WorkoutSession) -> some View {
-        GeometryReader { geometry in
-            let inline = typeSize.isAccessibilitySize || geometry.size.height < 400
-            List {
-                if let lift = session.selected {
-                    let lastSets = journal.lastSets(named: lift.name)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(lift.name).font(.title2.bold())
-                            .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
-                        Text("Last time").font(.caption.bold()).foregroundStyle(Style.mint)
-                            .accessibilityIdentifier("last-session-reference")
-                        if lastSets.isEmpty {
-                            Text("First session with this exercise").font(.subheadline).foregroundStyle(Style.muted)
-                        } else {
-                            ScrollView(.horizontal) {
-                                HStack(spacing: 8) {
-                                    ForEach(lastSets) { previous in
-                                        Button {
-                                            change {
-                                                try journal.updateDraft(lift.id, in: sessionID) {
-                                                    $0.draftKilograms = previous.kilograms
-                                                    $0.draftReps = previous.reps
-                                                }
-                                            }
-                                        } label: {
-                                            Text(previous.summary).font(.subheadline.monospacedDigit())
-                                                .padding(.horizontal, 12).frame(minHeight: 44)
-                                                .background(Style.card, in: Capsule())
-                                        }.buttonStyle(.plain)
-                                            .accessibilityIdentifier("last-set-\(previous.setNumber)")
-                                            .accessibilityHint("Use for the next set")
-                                    }
-                                }
-                            }.scrollIndicators(.hidden)
-                        }
-                    }.frame(maxWidth: .infinity, alignment: .leading).workoutRow()
+    private func card(_ lift: ExerciseDraft, in session: WorkoutSession) -> some View {
+        let entries = session.entries(for: lift)
+        let closed = collapsed.contains(lift.id)
+        return VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(Style.motion) {
+                    if closed { collapsed.remove(lift.id) } else { collapsed.insert(lift.id) }
                 }
-                SpotifyBar().workoutRow()
-                if let lift = session.selected {
-                    let entries = session.entries(for: lift)
-                    HStack {
-                        SectionTitle(text: "Logged sets")
-                        if let last = entries.last {
-                            Button {
-                                change { try journal.remove(last.id, from: sessionID) }
-                            } label: {
-                                Label("Undo", systemImage: "arrow.uturn.backward").font(.subheadline)
-                                    .frame(minHeight: 44)
-                            }.buttonStyle(.plain).accessibilityLabel("Undo Last Set")
-                        }
-                    }.workoutRow()
-                    if entries.isEmpty {
-                        Text("No sets yet").font(.subheadline).foregroundStyle(Style.muted).workoutRow()
-                    }
-                    ForEach(entries) { entry in
-                        Button { editing = entry } label: {
-                            HStack(spacing: 10) {
-                                SetLine(entry: entry)
-                                Image(systemName: "pencil").font(.caption).foregroundStyle(Style.muted)
-                            }.frame(minHeight: 44).contentShape(Rectangle())
-                        }.buttonStyle(.plain).accessibilityHint("Edit set")
-                            .accessibilityLabel("Set \(entry.setNumber), \(entry.summary)")
-                            .accessibilityIdentifier("logged-set-\(entry.setNumber)")
-                            .padding(.horizontal, 14).background(Style.card, in: RoundedRectangle(cornerRadius: 12))
-                            .workoutRow().swipeActions {
-                                Button("Delete", role: .destructive) {
-                                    change { try journal.remove(entry.id, from: sessionID) }
-                                }
-                            }
-                    }
-                } else {
-                    EmptyState("Choose your first exercise", systemImage: "dumbbell",
-                                           description: "Your sets will appear here as you log them.").workoutRow()
-                }
-                if inline { console(for: session).workoutRow() }
-            }
-            .listSurface()
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                if !inline { console(for: session).padding(.horizontal, 16).padding(.vertical, 6).background(.black) }
-            }
-        }
-        .navigationTitle(session.routineName).navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                IconControl(title: "Back to Today", icon: "chevron.down") { dismiss() }
-            }
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button("Finish") { finishing = true }
-                    .frame(minHeight: 44)
-                    .accessibilityLabel("Finish Workout")
-                    .accessibilityIdentifier("finish-workout")
-            }
-        }
-        .confirmationDialog("Finish this workout?", isPresented: $finishing, titleVisibility: .visible) {
-            Button("Finish Workout") { change { try journal.finish(sessionID); dismiss() } }
-            Button("Keep logging", role: .cancel) {}
-        }
-        .onAppear { Haptics.prepare() }
-        .sheet(isPresented: $adding) { QuickLiftSheet(sessionID: sessionID) }
-        .sheet(item: $editing) { entry in
-            if let lift = session.lifts.first(where: { $0.id == entry.liftID }) {
-                EditSetSheet(entry: entry, lift: lift, sessionID: sessionID)
-            }
-        }
-        .reporting($failure)
-    }
-
-    private func console(for session: WorkoutSession) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if let lift = session.selected {
-                let currentDraft = {
-                    journal.workout(sessionID)?.lifts.first { $0.id == lift.id } ?? lift
-                }
-                ScrollViewReader { proxy in
-                    ScrollView(.horizontal) {
-                        HStack(spacing: 8) {
-                            ForEach(session.ordered) { item in
-                                Button {
-                                    change { try journal.selectLift(item.id, in: sessionID) }
-                                } label: {
-                                    Text(item.name).font(.subheadline.weight(.semibold)).padding(.horizontal, 12)
-                                        .frame(minHeight: 44)
-                                        .foregroundStyle(item.id == lift.id ? Style.mint : Style.muted)
-                                        .background(Style.card, in: Capsule())
-                                        .overlay { Capsule().strokeBorder(item.id == lift.id ? Style.mint : Style.line) }
-                                }.buttonStyle(.plain).id(item.id)
-                                    .accessibilityAddTraits(item.id == lift.id ? .isSelected : [])
-                            }
-                            IconControl(title: "Add exercise", icon: "plus") { adding = true }
-                        }
-                    }.scrollIndicators(.hidden)
-                        .onAppear { proxy.scrollTo(lift.id, anchor: .center) }
-                        .onChange(of: lift.id) { id in proxy.scrollTo(id, anchor: .center) }
-                }
+                Haptics.tap()
+            } label: {
                 HStack {
-                    Text("Set \(session.entries(for: lift).count + 1)").font(.title2.bold()).monospacedDigit()
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(lift.name).font(.headline)
+                        if closed {
+                            Text(summary(entries, unit: lift.unit)).font(.caption).foregroundStyle(Style.muted)
+                        }
+                    }
                     Spacer()
-                    UnitSwitch(selection: Binding(get: { currentDraft().unit }, set: { unit in
-                        change { try journal.updateDraft(lift.id, in: sessionID) { $0.unit = unit } }
-                    }))
-                }
-                SetControls(unit: lift.unit, increment: lift.increment,
-                            kilograms: Binding(get: { currentDraft().draftKilograms }, set: { value in
-                                change { try journal.updateDraft(lift.id, in: sessionID) { $0.draftKilograms = value } }
-                            }),
-                            reps: Binding(get: { currentDraft().draftReps }, set: { value in
-                                change { try journal.updateDraft(lift.id, in: sessionID) { $0.draftReps = value } }
-                            }))
-                PrimaryButton(title: "Log Set", icon: "plus") {
-                    do {
-                        try withAnimation(Style.motion) { try journal.log(lift.id, in: sessionID) }
-                        Haptics.success()
-                    } catch { failure = error.localizedDescription }
-                }
-            } else {
-                PrimaryButton(title: "Choose exercise", icon: "plus") { adding = true }
+                    Image(systemName: "chevron.down").rotationEffect(.degrees(closed ? -90 : 0))
+                }.frame(minHeight: 44).contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityValue(closed ? "Collapsed" : "Expanded")
+                .accessibilityIdentifier("exercise-\(lift.name)")
+            if !closed {
+                VStack(spacing: 0) {
+                    ForEach(entries) { entry in
+                        Divider()
+                        HStack(spacing: 4) {
+                            IconControl(title: entry.isTarget == true ? "Mark performed" : "Mark pending",
+                                        icon: entry.isTarget == true ? "circle" : "checkmark.circle.fill") {
+                                change { try journal.togglePerformed(entry.id, in: sessionID) }
+                            }.disabled(!session.isActive)
+                            Text("Set \(entry.setNumber)").font(.caption)
+                            Spacer()
+                            Button(entry.summary) { editing = entry }.disabled(!session.isActive)
+                                .frame(minHeight: 44).accessibilityIdentifier("set-\(entry.setNumber)")
+                            if session.isActive {
+                                Menu {
+                                    Button("Edit") { editing = entry }
+                                    Button("Delete", role: .destructive) { change { try journal.remove(entry.id, from: sessionID) } }
+                                } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
+                                .accessibilityLabel("Set options")
+                            }
+                        }
+                    }
+                    if session.isActive {
+                        Button { change { try journal.log(lift.id, in: sessionID) } } label: {
+                            Label("Add set", systemImage: "plus").frame(minHeight: 44)
+                        }
+                    }
+                }.transition(.opacity.combined(with: .move(edge: .top)))
             }
-        }
+        }.monospacedDigit().panel().clipped()
+    }
+
+    private func summary(_ entries: [LoggedSet], unit: LoadUnit) -> String {
+        guard let heaviest = entries.map(\.kilograms).max() else { return "0 sets" }
+        let weight = unit.display(heaviest).formatted(.number.precision(.fractionLength(0...2)))
+        return "\(entries.count) sets · \(weight) \(unit.rawValue)"
     }
 
     private func change(_ action: () throws -> Void) {
-        do {
-            try withAnimation(Style.motion, action)
-            Haptics.tap()
-        } catch { failure = error.localizedDescription }
+        do { try withAnimation(Style.motion, action); Haptics.tap() } catch { failure = error.localizedDescription }
     }
 }
 
-private struct QuickLiftSheet: View {
+private struct ExercisePicker: View {
     @EnvironmentObject private var journal: Journal
     @Environment(\.dismiss) private var dismiss
     let sessionID: UUID
-    @State private var unit = LoadUnit.kg
+    @State private var query = ""
     @State private var failure: String?
-    private let common = ["Back squat", "Bench press", "Deadlift", "Overhead press", "Dumbbell row",
-                          "Pull-up", "Lat pulldown", "Leg press", "Biceps curl", "Triceps extension"]
-
-    private var choices: [String] {
-        let lifts = journal.workout(sessionID)?.lifts ?? []
-        var used = Set(lifts.map { $0.name.liftKey })
-        let saved = journal.snapshot.routines.flatMap(\.exercises).map(\.exerciseName).sorted()
-        return (saved + common).filter { used.insert($0.liftKey).inserted }
-    }
+    private var used: Set<String> { Set((journal.workout(sessionID)?.lifts ?? []).map { $0.name.liftKey }) }
 
     var body: some View {
         NavigationStack {
             List {
-                HStack { Text("Weight unit"); Spacer(); UnitSwitch(selection: $unit) }.workoutRow()
-                ForEach(choices, id: \.self) { name in
-                    Button {
-                        do {
-                            try journal.addLift(named: name, unit: unit, to: sessionID)
-                            dismiss()
-                        } catch { failure = error.localizedDescription }
-                    } label: {
-                        HStack { Text(name); Spacer(); Image(systemName: "plus") }
-                            .frame(minHeight: 44).contentShape(Rectangle())
-                    }.buttonStyle(.plain).accessibilityLabel(name).workoutRow()
+                TextField("Search or create", text: $query).submitLabel(.done)
+                let available = journal.snapshot.presets.filter {
+                    !used.contains($0.name.liftKey) && (query.trimmed.isEmpty || $0.name.liftKey.contains(query.liftKey))
                 }
-                if choices.isEmpty { Text("All available exercises are in this workout.").workoutRow() }
-            }.listSurface().navigationTitle("Choose exercise").navigationBarTitleDisplayMode(.inline)
+                if !query.trimmed.isEmpty && !used.contains(query.liftKey) && !available.contains(where: { $0.name.liftKey == query.liftKey }) {
+                    Button { add(query) } label: { Label(query.trimmed, systemImage: "plus") }
+                }
+                ForEach(available) { preset in Button(preset.name) { add(preset.name) } }
+            }.navigationTitle("Add exercise").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
                 .reporting($failure)
-        }.presentationDetents([.medium, .large])
+        }
+    }
+
+    private func add(_ name: String) {
+        do {
+            try journal.addLift(named: name, unit: journal.snapshot.defaults.unit, to: sessionID)
+            Haptics.tap()
+            dismiss()
+        } catch { failure = error.localizedDescription }
     }
 }

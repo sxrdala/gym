@@ -30,7 +30,12 @@ struct FoodEntry: Codable, Identifiable, Equatable {
 }
 
 struct DailyNutrition: Codable, Equatable {
-    var goals = Nutrients.defaultGoals
+    var goalOverride: Nutrients?
+    var goals: Nutrients {
+        get { goalOverride ?? .defaultGoals }
+        set { goalOverride = newValue }
+    }
+    enum CodingKeys: String, CodingKey { case goalOverride = "goals", entries }
     var entries: [FoodEntry] = []
     var consumed: Nutrients { entries.reduce(.zero) { $0 + $1.meal.nutrients } }
 }

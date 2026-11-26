@@ -203,6 +203,101 @@ final class JournalTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testActivityAndNetCaloriesRoundTrip() throws {
+        try withDisk { store in
+            let journal = Journal(store: store)
+            let day = TrainingDay.days[1], next = TrainingDay.days[2]
+            var profile = AthleteProfile()
+            profile.weightKg = 80
+            profile.goals.calories = 2300
+            try journal.saveProfile(profile)
+            try journal.recordSteps(2_000, on: day)
+            try journal.recordSteps(3_000, on: day)
+            try journal.recordSteps(3_000, on: day)
+            try journal.logCardio("Cycling", minutes: 30, met: 7, on: day)
+            try journal.logMeal(Meal(name: "Lunch", nutrients: Nutrients(calories: 500, protein: 20, carbs: 50, fats: 10)), on: day)
+            let reader = Journal(store: store)
+            let activity = reader.activity(on: day)
+            XCTAssertEqual(activity.steps?.count, 3_000)
+            XCTAssertEqual(activity.steps?.calories, 120)
+            XCTAssertEqual(activity.sessions.first?.calories, 280)
+            XCTAssertEqual(activity.burned, 400)
+            XCTAssertEqual(reader.netCalories(on: day), 100)
+            XCTAssertEqual(reader.nutrition(on: day).goals.calories, 2300)
+            XCTAssertNil(reader.activity(on: next).steps)
+            XCTAssertEqual(reader.netCalories(on: next), 0)
+            profile.weightKg = 90
+            try reader.saveProfile(profile)
+            XCTAssertEqual(reader.activity(on: day).sessions.first?.calories, 280)
+            try reader.deleteCardio(try XCTUnwrap(activity.sessions.first?.id), on: day)
+            XCTAssertTrue(try store.load().activity[TrainingDay.key(day)]?.sessions.isEmpty == true)
+            XCTAssertThrowsError(try reader.logCardio("Run", minutes: -1, met: 5, on: day))
+            XCTAssertThrowsError(try reader.logCardio("Run", minutes: 30, met: .nan, on: day))
+            XCTAssertThrowsError(try reader.recordSteps(-1, on: day))
+        }
+    }
+
+    @MainActor
+    func testFinishedWorkoutCopiesIndependentTargetsAndDeletesOnlySource() throws {
+        try withDisk { store in
+            let journal = Journal(store: store)
+            let yesterday = TrainingDay.days[0], today = TrainingDay.days[1]
+            let source = try journal.createWorkout(named: "Push", on: yesterday)
+            XCTAssertThrowsError(try journal.deleteFinished(source.id))
+            XCTAssertThrowsError(try journal.duplicateToToday(source.id, now: today))
+            try journal.addLift(named: "Bench press", unit: .kg, to: source.id)
+            let set = try XCTUnwrap(journal.workout(source.id)?.sets.first)
+            try journal.edit(set.id, in: source.id, kilograms: 80, reps: 5, unit: .kg)
+            try journal.togglePerformed(set.id, in: source.id)
+            try journal.finish(source.id)
+            try journal.duplicateToToday(source.id, now: today)
+            let copy = try XCTUnwrap(journal.sessions(on: today).first)
+            XCTAssertTrue(copy.isActive)
+            XCTAssertEqual(journal.selectedDay, today)
+            XCTAssertEqual(copy.routineName, "Push")
+            XCTAssertEqual(copy.sets.map(\.setNumber), [1, 2])
+            XCTAssertEqual(copy.sets.first?.weight, 80)
+            XCTAssertEqual(copy.sets.first?.reps, 5)
+            XCTAssertTrue(copy.completedSets.isEmpty)
+            XCTAssertNotEqual(copy.sets.first?.id, set.id)
+            XCTAssertNotEqual(copy.lifts.first?.id, set.liftID)
+            XCTAssertEqual(copy.sets.first?.liftID, copy.lifts.first?.id)
+            try journal.deleteFinished(source.id)
+            let reopened = Journal(store: store)
+            XCTAssertEqual(reopened.snapshot.sessions, [copy])
+        }
+    }
+
+    @MainActor
+    func testPresetEditsAndPerExerciseDefaultsPersist() throws {
+        try withDisk { store in
+            let journal = Journal(store: store)
+            let preset = try XCTUnwrap(journal.snapshot.presets.first)
+            XCTAssertEqual(journal.snapshot.defaults.sets, 2)
+            try journal.savePreset("Front squat", id: preset.id)
+            XCTAssertThrowsError(try journal.savePreset(" FRONT SQUAT "))
+            try journal.savePreset("Sled push")
+            var defaults = journal.snapshot.defaults
+            defaults.unit = .lb
+            defaults.sets = 3
+            defaults.lbIncrement = 10
+            try journal.saveDefaults(defaults)
+            let workout = try journal.createWorkout(named: "Lower", on: TrainingDay.days[0])
+            try journal.addLift(named: "Front squat", unit: .lb, to: workout.id)
+            try journal.deletePreset(preset.id)
+            let reopened = Journal(store: store)
+            let copy = try XCTUnwrap(reopened.workout(workout.id))
+            XCTAssertEqual(copy.ordered.first?.name, "Front squat")
+            XCTAssertEqual(copy.ordered.first?.increment, 10)
+            XCTAssertEqual(copy.sets.map(\.unit), [.lb, .lb, .lb])
+            XCTAssertTrue(copy.completedSets.isEmpty)
+            XCTAssertEqual(reopened.snapshot.defaults, defaults)
+            XCTAssertFalse(reopened.snapshot.presets.contains { $0.id == preset.id })
+            XCTAssertTrue(reopened.snapshot.presets.contains { $0.name == "Sled push" })
+        }
+    }
+
     func testConversionAndDisplayPrecision() {
         XCTAssertEqual(LoadUnit.lb.kilograms(1), 0.45359237, accuracy: 1e-10)
         XCTAssertEqual(LoadUnit.lb.display(20), 44.09)
@@ -311,11 +406,15 @@ final class JournalTests: XCTestCase {
             var sessions = try XCTUnwrap(legacy["sessions"] as? [[String: Any]])
             sessions[0].removeValue(forKey: "assignedDay")
             legacy["sessions"] = sessions
+            for key in ["profile", "presets", "defaults", "playlists", "activity"] { legacy.removeValue(forKey: key) }
             legacy.removeValue(forKey: "meals")
             legacy.removeValue(forKey: "nutrition")
             try JSONSerialization.data(withJSONObject: legacy).write(to: store.url)
             let reader = Journal(store: store)
             XCTAssertTrue(reader.isOpen)
+            XCTAssertEqual(reader.snapshot.defaults.sets, 2)
+            XCTAssertFalse(reader.snapshot.presets.isEmpty)
+            XCTAssertTrue(reader.snapshot.activity.isEmpty)
             XCTAssertEqual(reader.activeWorkout?.dayKey, TrainingDay.key(session.startedAt))
             XCTAssertEqual(reader.activeWorkout?.completedSets.count, 1)
             try reader.selectDay(TrainingDay.days[0])

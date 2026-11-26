@@ -18,7 +18,9 @@ targets:
     deploymentTarget: "16.0"
     sources:
       - path: Setline
-        excludes: [Info.plist, .git]
+        excludes: [Info.plist, .git, Assets.xcassets]
+      - path: Setline/Assets.xcassets
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.setline

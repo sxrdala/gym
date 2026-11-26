@@ -1,87 +1,106 @@
 import SwiftUI
+import UIKit
 
-struct SpotifyBar: View {
+struct SpotifyConfig: View {
     @EnvironmentObject private var music: SpotifyManager
-    @State private var setup = false
+    @State private var copied = false
+    private let bundleID = Bundle.main.bundleIdentifier
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
-                IconControl(title: "Spotify Setup", icon: "headphones") { setup = true }
-                if music.state == .connected {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(music.title).font(.subheadline.weight(.semibold))
-                        Text(music.artist).font(.caption).foregroundStyle(Style.muted)
-                    }.lineLimit(1)
-                    Spacer(minLength: 0)
-                    IconControl(title: "Previous track", icon: "backward.end.fill") { music.playback(.previous) }
-                    IconControl(title: music.paused ? "Play" : "Pause",
-                                icon: music.paused ? "play.fill" : "pause.fill") { music.playback(.toggle) }
-                    IconControl(title: "Next track", icon: "forward.end.fill") { music.playback(.next) }
-                } else {
-                    if music.state == .connecting { ProgressView().controlSize(.small) }
-                    if music.state == .disconnected {
-                        Button("Connect & play", action: music.authorize)
-                            .font(.subheadline.weight(.semibold)).frame(minHeight: 44)
-                    }
-                    Spacer(minLength: 0)
-                    Button(action: music.openSpotify) {
-                        Label("Open Spotify", systemImage: "arrow.up.right")
-                            .font(.subheadline.weight(.medium)).frame(minHeight: 44)
-                            .accessibilityLabel("Open Spotify")
-                    }.buttonStyle(.plain)
+        VStack(alignment: .leading, spacing: 8) {
+            LabeledContent("Client ID", value: music.configured ? "Configured" : "Missing")
+            HStack {
+                VStack(alignment: .leading) {
+                    Text("Bundle ID").font(.caption).foregroundStyle(Style.muted)
+                    Text(bundleID ?? "Unknown").font(.callout.monospaced()).textSelection(.enabled)
                 }
+                Spacer()
+                Button(copied ? "Copied" : "Copy") {
+                    UIPasteboard.general.string = bundleID
+                    copied = true
+                    Haptics.tap()
+                }.frame(minHeight: 44).disabled(bundleID == nil)
             }
-            if let message = music.launchMessage {
-                Text(message).font(.caption).foregroundStyle(Style.muted)
-            }
-        }.padding(.horizontal, 10).padding(.vertical, 2)
-            .background(Style.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .animation(Style.motion, value: music.state)
-            .sheet(isPresented: $setup) { SpotifySetup() }
+        }
     }
 }
 
-struct SpotifySetup: View {
+struct MusicView: View {
     @EnvironmentObject private var music: SpotifyManager
+    @EnvironmentObject private var journal: Journal
+    @State private var adding = false
+    @State private var failure: String?
+
+    var body: some View {
+        List {
+            VStack(alignment: .leading, spacing: 12) {
+                Label(music.state.rawValue, systemImage: "headphones")
+                    .font(.subheadline).foregroundStyle(Style.mint)
+                if !music.title.isEmpty {
+                    Text(music.title).font(.title2.bold())
+                    Text(music.artist).foregroundStyle(Style.muted)
+                }
+                HStack(spacing: 18) {
+                    control("Previous", "backward.end.fill", .previous)
+                    control(music.paused ? "Play" : "Pause", music.paused ? "play.circle.fill" : "pause.circle.fill", .toggle)
+                    control("Next", "forward.end.fill", .next)
+                }.frame(maxWidth: .infinity).disabled(music.state != .connected)
+                if let message = music.message { Text(message).font(.footnote).textSelection(.enabled) }
+                if music.configured && music.state != .connected {
+                    PrimaryButton(title: "Connect Spotify", icon: "arrow.up.right") { music.authorize() }
+                        .disabled(music.state == .connecting)
+                }
+                Button("Open Spotify", action: music.openSpotify).frame(minHeight: 44)
+            }.panel().panelRow()
+            HStack {
+                SectionTitle(text: "Downloaded playlists")
+                IconControl(title: "Add playlist", icon: "plus") { adding = true }
+            }.panelRow()
+            ForEach(journal.snapshot.playlists) { playlist in
+                Button { music.authorize(uri: playlist.uri) } label: {
+                    Label(playlist.name, systemImage: "play.fill").frame(minHeight: 44)
+                }.disabled(!music.configured).panelRow().swipeActions {
+                    Button("Delete", role: .destructive) {
+                        do { try journal.deletePlaylist(playlist.id) } catch { failure = error.localizedDescription }
+                    }
+                }
+            }
+            SpotifyConfig().panel().panelRow()
+        }.listSurface().navigationTitle("Music").navigationBarTitleDisplayMode(.inline)
+            .sheet(isPresented: $adding) { PlaylistForm() }
+            .reporting($failure)
+    }
+
+    private func control(_ title: String, _ symbol: String, _ command: SpotifyManager.PlaybackCommand) -> some View {
+        Button { music.playback(command); Haptics.tap() } label: {
+            Image(systemName: symbol).font(.system(size: command == .toggle ? 56 : 28))
+                .frame(minWidth: 52, minHeight: 60)
+        }.accessibilityLabel(title).buttonStyle(.borderless)
+    }
+}
+
+private struct PlaylistForm: View {
+    @EnvironmentObject private var journal: Journal
     @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var uri = ""
+    @State private var failure: String?
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    instruction("Connect while online", "Sign in to Spotify on this iPhone. Tap Connect Spotify below and approve access. Spotify may resume playback.")
-                    instruction("Download your playlist", "In Spotify, open the playlist and turn on Download. Wait for the download to finish before switching to Airplane Mode.")
-                    instruction("Play between sets", "In GymBlox, tap Connect & play to start Spotify. Once connected, use the workout bar to pause, resume, or move between tracks.")
-                    if music.state == .connected {
-                        Label("Connected to Spotify", systemImage: "checkmark.circle").foregroundStyle(Style.mint)
-                    } else if music.state == .unconfigured {
-                        Text("This build needs a Spotify client ID to enable playback controls. You can still open Spotify.")
-                            .font(.subheadline).foregroundStyle(Style.muted)
-                    } else {
-                        if music.state == .offlineUnavailable {
-                            Text("Spotify is unavailable. Open Spotify to start your playlist, then reconnect.")
-                                .font(.subheadline).foregroundStyle(Style.muted)
-                        }
-                        PrimaryButton(title: music.state == .connecting ? "Connecting…" : "Connect Spotify",
-                                      icon: "arrow.up.right", action: music.authorize)
-                            .disabled(music.state == .connecting)
+            Form {
+                TextField("Playlist name", text: $name)
+                TextField("spotify:playlist:…", text: $uri).textInputAutocapitalization(.never).autocorrectionDisabled()
+            }.navigationTitle("Add playlist").navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") {
+                            do { try journal.savePlaylist(name: name, uri: uri); dismiss() }
+                            catch { failure = error.localizedDescription }
+                        }.disabled(name.trimmed.isEmpty || uri.trimmed.isEmpty)
                     }
-                    Button(action: music.openSpotify) {
-                        Label("Open Spotify", systemImage: "arrow.up.right").frame(minHeight: 44)
-                    }
-                    if let message = music.launchMessage { Text(message).font(.footnote).foregroundStyle(Style.muted) }
-                }.padding(18)
-            }
-            .navigationTitle("Spotify Setup").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+                }.reporting($failure)
         }
-    }
-
-    private func instruction(_ title: String, _ detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(title).font(.headline)
-            Text(detail).font(.subheadline).foregroundStyle(Style.muted)
-        }.frame(maxWidth: .infinity, alignment: .leading).panel()
     }
 }

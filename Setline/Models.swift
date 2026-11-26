@@ -31,6 +31,12 @@ struct JournalSnapshot: Codable, Equatable {
     var meals: [Meal] = []
     var nutrition: [String: DailyNutrition] = [:]
 
+    var profile = AthleteProfile()
+    var defaults = WorkoutDefaults()
+    var presets = ExercisePreset.seeded()
+    var activity: [String: DailyActivity] = [:]
+    var playlists: [SavedPlaylist] = []
+
     init() {}
 
     init(from decoder: Decoder) throws {
@@ -38,6 +44,11 @@ struct JournalSnapshot: Codable, Equatable {
         routines = try data.decode([Routine].self, forKey: .routines)
         sessions = try data.decode([WorkoutSession].self, forKey: .sessions)
         tasks = try data.decode([DailyTask].self, forKey: .tasks)
+        profile = try data.decodeIfPresent(AthleteProfile.self, forKey: .profile) ?? AthleteProfile()
+        defaults = try data.decodeIfPresent(WorkoutDefaults.self, forKey: .defaults) ?? WorkoutDefaults()
+        presets = try data.decodeIfPresent([ExercisePreset].self, forKey: .presets) ?? ExercisePreset.seeded(routines: routines)
+        activity = try data.decodeIfPresent([String: DailyActivity].self, forKey: .activity) ?? [:]
+        playlists = try data.decodeIfPresent([SavedPlaylist].self, forKey: .playlists) ?? []
         selectedDay = try data.decodeIfPresent(String.self, forKey: .selectedDay)
         meals = try data.decodeIfPresent([Meal].self, forKey: .meals) ?? []
         nutrition = try data.decodeIfPresent([String: DailyNutrition].self, forKey: .nutrition) ?? [:]

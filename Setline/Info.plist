@@ -20,8 +20,9 @@
   <key>CFBundleURLTypes</key>
   <array><dict>
     <key>CFBundleURLName</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-    <key>CFBundleURLSchemes</key><array><string>setline</string></array>
+    <key>CFBundleURLSchemes</key><array><string>gymblox</string></array>
   </dict></array>
+  <key>NSMotionUsageDescription</key><string>GymBlox uses your step count to track daily activity and estimate calories burned.</string>
   <key>SpotifyClientID</key><string>$(SPOTIFY_CLIENT_ID)</string>
 </dict>
 </plist>
