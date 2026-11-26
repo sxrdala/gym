@@ -1,5 +1,5 @@
 import XCTest
-@testable import Setline
+@testable import GymBlox
 
 final class JournalTests: XCTestCase {
     @MainActor
@@ -211,6 +211,115 @@ final class JournalTests: XCTestCase {
             for value in [0.0, 2.5, 45.0, 82.75, 123.45] {
                 XCTAssertEqual(unit.display(unit.kilograms(value)), value, accuracy: 0.000001)
             }
+        }
+    }
+
+    @MainActor
+    func testThirtyDayCalendarAndDateBoundWorkouts() throws {
+        let days = TrainingDay.days
+        let keys = days.map(TrainingDay.key)
+        XCTAssertEqual(keys.count, 30)
+        XCTAssertEqual(Set(keys).count, 30)
+        XCTAssertEqual(keys.first, "2026-11-25")
+        XCTAssertEqual(keys.last, "2026-12-24")
+        for (first, second) in zip(days, days.dropFirst()) {
+            XCTAssertEqual(TrainingDay.calendar.dateComponents([.day], from: first, to: second).day, 1)
+        }
+        try withDisk { store in
+            let journal = Journal(store: store)
+            let quick = try journal.start(nil, on: days[0])
+            let push = try journal.createWorkout(named: " Push Day A ", on: days[29])
+            try journal.selectDay(days[29])
+            let recovered = Journal(store: store)
+            XCTAssertEqual(recovered.selectedDay, days[29])
+            XCTAssertEqual(recovered.sessions(on: days[29]).map(\.routineName), ["Push Day A"])
+            XCTAssertEqual(recovered.sessions(on: days[29]).first?.id, push.id)
+            XCTAssertEqual(recovered.sessions(on: days[0]).first?.id, quick.id)
+            XCTAssertTrue(recovered.sessions(on: days[1]).isEmpty)
+            XCTAssertEqual(recovered.activeWorkout?.id, quick.id)
+        }
+    }
+
+    @MainActor
+    func testCustomExercisesCommitTwoIndependentTargetsAndPerformedState() throws {
+        try withDisk { store in
+            let journal = Journal(store: store)
+            let id = try journal.createWorkout(named: "Upper", on: TrainingDay.days[5]).id
+            for name in ["Row", "Press"] { try journal.addLift(named: name, unit: .kg, to: id) }
+            let saved = try XCTUnwrap(store.load().sessions.first)
+            XCTAssertEqual(saved.ordered.map(\.name), ["Row", "Press"])
+            for lift in saved.ordered {
+                XCTAssertEqual(saved.entries(for: lift).map(\.setNumber), [1, 2])
+            }
+            XCTAssertTrue(saved.completedSets.isEmpty)
+            let row = saved.ordered[0]
+            let targets = saved.entries(for: row)
+            try journal.edit(targets[0].id, in: id, kilograms: 32.5, reps: 9, unit: .kg)
+            try journal.edit(targets[1].id, in: id, kilograms: 35, reps: 6, unit: .kg)
+            try journal.togglePerformed(targets[1].id, in: id)
+            let copy = try XCTUnwrap(Journal(store: store).workout(id))
+            XCTAssertEqual(copy.entries(for: row).map(\.weight), [32.5, 35])
+            XCTAssertEqual(copy.entries(for: row).map(\.reps), [9, 6])
+            XCTAssertEqual(copy.completedSets.map(\.id), [targets[1].id])
+            try journal.log(row.id, in: id)
+            try journal.remove(targets[0].id, from: id)
+            try journal.finish(id)
+            XCTAssertEqual(journal.lastSets(named: "Row").map(\.id), [targets[1].id])
+            XCTAssertEqual(journal.history.first?.entries(for: row).map(\.setNumber), [1, 2])
+        }
+    }
+
+    @MainActor
+    func testMealsTotalsDayGoalsAndDeletionRecoverFromDisk() throws {
+        try withDisk { store in
+            let journal = Journal(store: store)
+            let day = TrainingDay.days[6], other = TrainingDay.days[7]
+            let meal = Meal(name: "Chicken & Rice Bowl",
+                            nutrients: Nutrients(calories: 510, protein: 41, carbs: 55, fats: 14))
+            let goals = Nutrients(calories: 2100, protein: 130, carbs: 240, fats: 68)
+            try journal.saveMeal(meal)
+            try journal.saveGoals(goals, on: day)
+            try journal.logMeal(meal, on: day)
+            try journal.logMeal(meal, on: day)
+            try journal.logMeal(meal, on: other)
+            let reader = Journal(store: store)
+            XCTAssertEqual(reader.snapshot.meals, [meal])
+            let first = reader.nutrition(on: day)
+            XCTAssertEqual(first.goals, goals)
+            XCTAssertEqual(first.consumed, Nutrients(calories: 1020, protein: 82, carbs: 110, fats: 28))
+            XCTAssertEqual(first.entries.count, 2)
+            XCTAssertNotEqual(first.entries[0].id, first.entries[1].id)
+            XCTAssertEqual(TrainingDay.key(first.entries[0].loggedAt), TrainingDay.key(day))
+            XCTAssertEqual(reader.nutrition(on: other).goals, .defaultGoals)
+            try reader.deleteFood(first.entries[0].id, on: day)
+            let reopened = Journal(store: store)
+            XCTAssertEqual(reopened.nutrition(on: day).consumed, meal.nutrients)
+            XCTAssertEqual(reopened.nutrition(on: other).consumed, meal.nutrients)
+            XCTAssertEqual(reopened.snapshot.meals, [meal])
+        }
+    }
+
+    @MainActor
+    func testPreUpgradeJournalOpensAndSurvivesNewWrites() throws {
+        try withDisk { store in
+            let writer = Journal(store: store)
+            let session = try writer.start(nil)
+            try writer.addLift(named: "Row", unit: .kg, to: session.id)
+            try writer.log(try XCTUnwrap(writer.activeWorkout?.selectedLiftID), in: session.id)
+            try writer.createTask("Pack shoes")
+            var legacy = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: store.url)) as? [String: Any])
+            var sessions = try XCTUnwrap(legacy["sessions"] as? [[String: Any]])
+            sessions[0].removeValue(forKey: "assignedDay")
+            legacy["sessions"] = sessions
+            legacy.removeValue(forKey: "meals")
+            legacy.removeValue(forKey: "nutrition")
+            try JSONSerialization.data(withJSONObject: legacy).write(to: store.url)
+            let reader = Journal(store: store)
+            XCTAssertTrue(reader.isOpen)
+            XCTAssertEqual(reader.activeWorkout?.dayKey, TrainingDay.key(session.startedAt))
+            XCTAssertEqual(reader.activeWorkout?.completedSets.count, 1)
+            try reader.selectDay(TrainingDay.days[0])
+            XCTAssertEqual(try store.load().tasks.map(\.title), ["Pack shoes"])
         }
     }
 }

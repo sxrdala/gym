@@ -1,4 +1,4 @@
-name: Build Setline IPA
+name: Build GymBlox IPA
 
 on:
   push:
@@ -16,18 +16,19 @@ jobs:
       - name: Generate Xcode project
         run: |
           xcodebuild -version
+          find Setline SetlineTests SetlineUITests -type f -name '*.swift' -exec xcrun swiftc -frontend -parse {} +
           brew install xcodegen
           xcodegen generate
 
       - name: Resolve Swift packages
         run: |
           xcodebuild -resolvePackageDependencies \
-            -project Setline.xcodeproj -scheme Setline -derivedDataPath build
+            -project GymBlox.xcodeproj -scheme GymBlox -derivedDataPath build
 
       - name: Build unsigned iPhone app
         run: |
-          xcodebuild -project Setline.xcodeproj \
-            -scheme Setline \
+          xcodebuild -project GymBlox.xcodeproj \
+            -scheme GymBlox \
             -configuration Release \
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
@@ -39,20 +40,21 @@ jobs:
 
       - name: Package and verify IPA
         run: |
-          app="build/Build/Products/Release-iphoneos/Setline.app"
+          app="build/Build/Products/Release-iphoneos/GymBlox.app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$app/Info.plist")" = "GymBlox"
           test "$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$app/Info.plist")" = "16.0"
           executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Info.plist")"
           xcrun lipo "$app/$executable" -verify_arch arm64
           mkdir -p build/ipa/Payload
-          ditto "$app" build/ipa/Payload/Setline.app
-          ditto -c -k --keepParent build/ipa/Payload build/Setline.ipa
-          unzip -tq build/Setline.ipa
+          ditto "$app" build/ipa/Payload/GymBlox.app
+          ditto -c -k --keepParent build/ipa/Payload build/GymBlox.ipa
+          unzip -tq build/GymBlox.ipa
 
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Setline-unsigned
-          path: build/Setline.ipa
+          name: GymBlox-unsigned
+          path: build/GymBlox.ipa
           if-no-files-found: error
           compression-level: 0
 
@@ -72,21 +74,21 @@ jobs:
           runtime="$(xcrun simctl list runtimes --json | jq -er '
             [.runtimes[] | select(.isAvailable and .platform == "iOS")]
             | sort_by(.version | split(".") | map(tonumber)) | last | .identifier')"
-          device="$(xcrun simctl create "Setline 4.7 inch" \
+          device="$(xcrun simctl create "GymBlox 4.7 inch" \
             com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation "$runtime")"
           mkdir -p build
           xcodebuild test \
-            -project Setline.xcodeproj \
-            -scheme Setline \
+            -project GymBlox.xcodeproj \
+            -scheme GymBlox \
             -destination "platform=iOS Simulator,id=$device" \
             -parallel-testing-enabled NO \
-            -resultBundlePath build/SetlineTests.xcresult \
+            -resultBundlePath build/GymBloxTests.xcresult \
             CODE_SIGNING_ALLOWED=NO
 
       - name: Upload simulator test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Setline-simulator-tests
-          path: build/SetlineTests.xcresult
+          name: GymBlox-simulator-tests
+          path: build/GymBloxTests.xcresult
           if-no-files-found: ignore

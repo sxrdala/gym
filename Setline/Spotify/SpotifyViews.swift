@@ -14,11 +14,16 @@ struct SpotifyBar: View {
                         Text(music.artist).font(.caption).foregroundStyle(Style.muted)
                     }.lineLimit(1)
                     Spacer(minLength: 0)
+                    IconControl(title: "Previous track", icon: "backward.end.fill") { music.playback(.previous) }
                     IconControl(title: music.paused ? "Play" : "Pause",
-                                icon: music.paused ? "play.fill" : "pause.fill") { music.playback() }
-                    IconControl(title: "Next track", icon: "forward.end.fill") { music.playback(next: true) }
+                                icon: music.paused ? "play.fill" : "pause.fill") { music.playback(.toggle) }
+                    IconControl(title: "Next track", icon: "forward.end.fill") { music.playback(.next) }
                 } else {
                     if music.state == .connecting { ProgressView().controlSize(.small) }
+                    if music.state == .disconnected {
+                        Button("Connect & play", action: music.authorize)
+                            .font(.subheadline.weight(.semibold)).frame(minHeight: 44)
+                    }
                     Spacer(minLength: 0)
                     Button(action: music.openSpotify) {
                         Label("Open Spotify", systemImage: "arrow.up.right")
@@ -47,7 +52,7 @@ struct SpotifySetup: View {
                 VStack(alignment: .leading, spacing: 18) {
                     instruction("Connect while online", "Sign in to Spotify on this iPhone. Tap Connect Spotify below and approve access. Spotify may resume playback.")
                     instruction("Download your playlist", "In Spotify, open the playlist and turn on Download. Wait for the download to finish before switching to Airplane Mode.")
-                    instruction("Play between sets", "Start your playlist in Spotify. Return to your workout to pause, resume, or skip a track.")
+                    instruction("Play between sets", "In GymBlox, tap Connect & play to start Spotify. Once connected, use the workout bar to pause, resume, or move between tracks.")
                     if music.state == .connected {
                         Label("Connected to Spotify", systemImage: "checkmark.circle").foregroundStyle(Style.mint)
                     } else if music.state == .unconfigured {

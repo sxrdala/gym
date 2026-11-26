@@ -1,7 +1,8 @@
 import SwiftUI
 
 enum Style {
-    static let mint = Color(red: 0.68, green: 0.89, blue: 0.73)
+    static let mint = Color(red: 0.34, green: 0.94, blue: 0.69)
+    static let blue = Color(red: 0.36, green: 0.68, blue: 1)
     static let card = Color(white: 0.075)
     static let line = Color(white: 0.17)
     static let muted = Color(white: 0.67)

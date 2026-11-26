@@ -2,6 +2,24 @@ import XCTest
 
 final class RecoveryUITests: XCTestCase {
     @MainActor
+    func testSelectedDayDrivesCaloriesAndSurvivesRelaunch() {
+        let app = launchWithIsolatedStore()
+        let pills = app.scrollViews["training-days"]
+        let firstDay = app.buttons["day-2026-11-25"]
+        for _ in 0..<10 {
+            if firstDay.isHittable { break }
+            pills.swipeRight()
+        }
+        firstDay.tap()
+        app.tabBars.buttons["Calories"].tap()
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Nov 25")).firstMatch.exists)
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.buttons["day-2026-11-25"].isSelected)
+        XCTAssertTrue(app.buttons["Create Custom Workout"].isHittable)
+    }
+
+    @MainActor
     func testTerminateAndResumeTwoSets() {
         continueAfterFailure = false
         let app = launchWithIsolatedStore()

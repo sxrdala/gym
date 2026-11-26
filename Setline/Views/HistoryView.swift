@@ -13,12 +13,12 @@ struct HistoryView: View {
             ForEach(workouts) { workout in
                 NavigationLink { HistoryDetail(session: workout) } label: {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text(workout.startedAt.formatted(date: .abbreviated, time: .shortened))
+                        Text(workout.assignedDay ?? workout.startedAt.formatted(date: .abbreviated, time: .shortened))
                             .font(.subheadline).foregroundStyle(Style.muted)
                         Text(workout.routineName).font(.title3.bold())
                         HStack(spacing: 16) {
                             Label(duration(of: workout), systemImage: "timer")
-                            Label("\(workout.sets.count) sets", systemImage: "dumbbell")
+                            Label("\(workout.completedSets.count) sets", systemImage: "dumbbell")
                         }.font(.subheadline.monospacedDigit()).foregroundStyle(Style.muted)
                     }.frame(maxWidth: .infinity, alignment: .leading).panel()
                 }.panelRow()
@@ -32,11 +32,11 @@ struct HistoryView: View {
     }
 }
 
-private struct HistoryDetail: View {
+struct HistoryDetail: View {
     let session: WorkoutSession
     var body: some View {
         List {
-            Text(session.startedAt.formatted(date: .long, time: .shortened))
+            Text(session.assignedDay ?? session.startedAt.formatted(date: .long, time: .shortened))
                 .font(.subheadline).foregroundStyle(Style.muted).panelRow()
             if session.sets.isEmpty {
                 EmptyState("No sets logged", systemImage: "dumbbell").panelRow()
@@ -49,6 +49,9 @@ private struct HistoryDetail: View {
                         ForEach(entries) { entry in
                             Divider()
                             SetLine(entry: entry)
+                            if entry.isTarget == true {
+                                Text("Uncompleted target").font(.caption).foregroundStyle(Style.muted)
+                            }
                         }
                     }.panel().panelRow()
                 }

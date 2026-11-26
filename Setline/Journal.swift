@@ -6,6 +6,7 @@ enum JournalError: String, LocalizedError {
     case duplicate = "This exercise is already on the list."
     case finished = "This workout has already finished."
     case missing = "This item is no longer available."
+    case nutrients = "Enter whole numbers from 0 to 99,999. Each daily goal must be at least 1."
     var errorDescription: String? { rawValue }
 }
 
@@ -33,7 +34,7 @@ final class Journal: ObservableObject {
     }
 
     var activeWorkout: WorkoutSession? {
-        snapshot.sessions.filter(\.isActive).max { $0.startedAt < $1.startedAt }
+        snapshot.sessions.filter { $0.isActive && !$0.isCustom }.max { $0.startedAt < $1.startedAt }
     }
 
     func workout(_ id: UUID) -> WorkoutSession? {
@@ -49,7 +50,7 @@ final class Journal: ObservableObject {
     func lastSets(named name: String) -> [LoggedSet] {
         let key = name.liftKey
         for session in history where session.completedAt != nil {
-            let entries = session.sets.filter { $0.exerciseName.liftKey == key }
+            let entries = session.completedSets.filter { $0.exerciseName.liftKey == key }
             if !entries.isEmpty { return entries.sorted { $0.setNumber < $1.setNumber } }
         }
         return []
@@ -64,9 +65,32 @@ final class Journal: ObservableObject {
         snapshot = candidate
     }
 
-    func start(_ routine: Routine?) throws -> WorkoutSession {
+    var selectedDay: Date { TrainingDay.selection(snapshot.selectedDay) }
+
+    func selectDay(_ day: Date) throws {
+        let key = TrainingDay.key(day)
+        guard TrainingDay.days.contains(where: { TrainingDay.key($0) == key }) else { throw JournalError.missing }
+        try commit { $0.selectedDay = key }
+    }
+
+    func sessions(on day: Date) -> [WorkoutSession] {
+        let key = TrainingDay.key(day)
+        return snapshot.sessions.filter { $0.dayKey == key }
+    }
+
+    func createWorkout(named name: String, on day: Date) throws -> WorkoutSession {
+        guard !name.trimmed.isEmpty else { throw JournalError.blank }
+        var session = WorkoutSession(name: name.trimmed)
+        session.assignedDay = TrainingDay.key(day)
+        session.customWorkout = true
+        try commit { $0.sessions.append(session) }
+        return session
+    }
+
+    func start(_ routine: Routine?, on day: Date? = nil) throws -> WorkoutSession {
         if let activeWorkout { return activeWorkout }
         var session = WorkoutSession(name: routine?.name ?? "Quick workout")
+        session.assignedDay = TrainingDay.key(day ?? session.startedAt)
         session.lifts = (routine?.ordered ?? []).map { exercise in
             let lift = ExerciseDraft(name: exercise.exerciseName, order: exercise.sortOrder,
                                      unit: exercise.preferredUnit, increment: exercise.defaultIncrement)
@@ -90,9 +114,18 @@ final class Journal: ObservableObject {
         guard !name.isEmpty else { throw JournalError.blank }
         try updateWorkout(sessionID) { session in
             guard !session.lifts.contains(where: { $0.name.liftKey == name.liftKey }) else { throw JournalError.duplicate }
-            let lift = ExerciseDraft(name: name, order: session.lifts.count, unit: unit, increment: unit.increment)
-            session.lifts.append(prefilled(lift, entries: []))
+            let weightUnit: LoadUnit = session.isCustom ? .kg : unit
+            let lift = prefilled(ExerciseDraft(name: name, order: session.lifts.count,
+                                               unit: weightUnit, increment: weightUnit.increment), entries: [])
+            session.lifts.append(lift)
             session.selectedLiftID = lift.id
+            if session.isCustom {
+                for number in 1...2 {
+                    var entry = LoggedSet(lift: lift, number: number)
+                    entry.isTarget = true
+                    session.sets.append(entry)
+                }
+            }
         }
     }
 
@@ -115,7 +148,9 @@ final class Journal: ObservableObject {
             let index = try liftIndex(liftID, in: session)
             let lift = session.lifts[index]
             let number = session.entries(for: lift).count + 1
-            session.sets.append(LoggedSet(lift: lift, number: number))
+            var entry = LoggedSet(lift: lift, number: number)
+            if session.isCustom { entry.isTarget = true }
+            session.sets.append(entry)
             refreshDraft(at: index, in: &session)
         }
     }
@@ -128,6 +163,15 @@ final class Journal: ObservableObject {
             session.sets[index].unit = unit
             session.sets[index].reps = reps
             refreshDraft(at: draftIndex, in: &session)
+        }
+    }
+
+    func togglePerformed(_ setID: UUID, in sessionID: UUID) throws {
+        try updateWorkout(sessionID) { session in
+            guard session.isCustom, let index = session.sets.firstIndex(where: { $0.id == setID })
+            else { throw JournalError.missing }
+            session.sets[index].isTarget = session.sets[index].isTarget != true
+            if session.sets[index].isTarget == false { session.sets[index].loggedAt = .now }
         }
     }
 
@@ -209,5 +253,39 @@ final class Journal: ObservableObject {
 
     func deleteTask(_ id: UUID) throws {
         try commit { $0.tasks.removeAll { $0.id == id } }
+    }
+
+    func nutrition(on day: Date) -> DailyNutrition {
+        snapshot.nutrition[TrainingDay.key(day)] ?? DailyNutrition()
+    }
+
+    func saveGoals(_ goals: Nutrients, on day: Date) throws {
+        guard goals.values.allSatisfy({ (1...99_999).contains($0) }) else { throw JournalError.nutrients }
+        try commit { $0.nutrition[TrainingDay.key(day), default: DailyNutrition()].goals = goals }
+    }
+
+    private func validate(_ meal: Meal) throws {
+        guard !meal.name.trimmed.isEmpty else { throw JournalError.blank }
+        guard meal.nutrients.values.allSatisfy({ (0...99_999).contains($0) }) else { throw JournalError.nutrients }
+    }
+
+    func saveMeal(_ meal: Meal) throws {
+        try validate(meal)
+        try commit { $0.meals.append(meal) }
+    }
+
+    func logMeal(_ meal: Meal, on day: Date, at time: Date = .now) throws {
+        try validate(meal)
+        let calendar = TrainingDay.calendar
+        let clock = calendar.dateComponents([.hour, .minute, .second], from: time)
+        let loggedAt = calendar.date(bySettingHour: clock.hour!, minute: clock.minute!, second: clock.second!, of: day) ?? day
+        try commit {
+            $0.nutrition[TrainingDay.key(day), default: DailyNutrition()].entries
+                .append(FoodEntry(meal: meal, loggedAt: loggedAt))
+        }
+    }
+
+    func deleteFood(_ id: UUID, on day: Date) throws {
+        try commit { $0.nutrition[TrainingDay.key(day)]?.entries.removeAll { $0.id == id } }
     }
 }

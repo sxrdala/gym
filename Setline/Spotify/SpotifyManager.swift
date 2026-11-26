@@ -156,14 +156,22 @@ final class SpotifyManager: NSObject, ObservableObject,
         if remote === appRemote { reset(to: .offlineUnavailable) }
     }
 
-    func playback(next: Bool = false) {
-        guard let remote, let player = remote.playerAPI else { return }
+    enum PlaybackCommand { case toggle, previous, next }
+
+    func playback(_ command: PlaybackCommand) {
+        guard let remote, remote.isConnected, let player = remote.playerAPI else {
+            reset(to: .offlineUnavailable)
+            return
+        }
         let callback: SPTAppRemoteCallback = { [weak self, weak remote] _, error in
             guard let self, let remote, self.remote === remote, error != nil else { return }
             self.reset(to: .offlineUnavailable)
         }
-        if next { player.skip(toNext: callback) }
-        else if paused { player.resume(callback) }
-        else { player.pause(callback) }
+        switch command {
+        case .previous: player.skip(toPrevious: callback)
+        case .next: player.skip(toNext: callback)
+        case .toggle:
+            if paused { player.resume(callback) } else { player.pause(callback) }
+        }
     }
 }

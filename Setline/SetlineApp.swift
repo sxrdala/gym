@@ -2,7 +2,7 @@ import SwiftUI
 
 @main
 @MainActor
-struct SetlineApp: App {
+struct GymBloxApp: App {
     @Environment(\.scenePhase) private var phase
     @StateObject private var spotify = SpotifyManager()
     @StateObject private var journal = Journal(store: JournalStore.applicationStore())
@@ -30,6 +30,8 @@ private struct JournalRoot: View {
             TabView {
                 NavigationStack { TodayView() }
                     .tabItem { Label("Today", systemImage: "sun.max") }
+                NavigationStack { CaloriesView() }
+                    .tabItem { Label("Calories", systemImage: "fork.knife") }
                 NavigationStack { RoutinesView() }
                     .tabItem { Label("Routines", systemImage: "square.stack.3d.up") }
                 NavigationStack { HistoryView() }

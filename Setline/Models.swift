@@ -27,6 +27,21 @@ struct JournalSnapshot: Codable, Equatable {
     var routines: [Routine] = []
     var sessions: [WorkoutSession] = []
     var tasks: [DailyTask] = []
+    var selectedDay: String?
+    var meals: [Meal] = []
+    var nutrition: [String: DailyNutrition] = [:]
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let data = try decoder.container(keyedBy: CodingKeys.self)
+        routines = try data.decode([Routine].self, forKey: .routines)
+        sessions = try data.decode([WorkoutSession].self, forKey: .sessions)
+        tasks = try data.decode([DailyTask].self, forKey: .tasks)
+        selectedDay = try data.decodeIfPresent(String.self, forKey: .selectedDay)
+        meals = try data.decodeIfPresent([Meal].self, forKey: .meals) ?? []
+        nutrition = try data.decodeIfPresent([String: DailyNutrition].self, forKey: .nutrition) ?? [:]
+    }
 }
 
 struct Routine: Codable, Identifiable, Equatable {
@@ -67,6 +82,12 @@ struct WorkoutSession: Codable, Identifiable, Equatable {
     var selectedLiftID: UUID?
     var lifts: [ExerciseDraft] = []
     var sets: [LoggedSet] = []
+    var assignedDay: String?
+    var customWorkout: Bool?
+
+    var isCustom: Bool { customWorkout == true }
+    var dayKey: String { assignedDay ?? TrainingDay.key(startedAt) }
+    var completedSets: [LoggedSet] { sets.filter { $0.isTarget != true } }
 
     var ordered: [ExerciseDraft] { lifts.sorted { $0.sortOrder < $1.sortOrder } }
     var selected: ExerciseDraft? { lifts.first { $0.id == selectedLiftID } ?? ordered.first }
@@ -113,6 +134,8 @@ struct LoggedSet: Codable, Identifiable, Equatable {
     var reps: Int
     var unit: LoadUnit
     var loggedAt = Date.now
+    // Older journals contain only performed sets.
+    var isTarget: Bool?
 
     var kilograms: Double { unit.kilograms(weight) }
     var summary: String {
