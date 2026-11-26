@@ -43,6 +43,7 @@ jobs:
           app="build/Build/Products/Release-iphoneos/GymBlox.app"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$app/Info.plist")" = "GymBlox"
           test "$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$app/Info.plist")" = "16.0"
+          python3 -c 'import plistlib, sys; assert plistlib.load(open(sys.argv[1], "rb"))["UIDeviceFamily"] == [1]' "$app/Info.plist"
           test -s "$app/Assets.car"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName' "$app/Info.plist")" = "AppIcon"
           test -s "$app/AppIcon60x60@2x.png"

@@ -23,6 +23,7 @@ targets:
         buildPhase: resources
     settings:
       base:
+        TARGETED_DEVICE_FAMILY: "1"
         PRODUCT_BUNDLE_IDENTIFIER: com.example.setline
         INFOPLIST_FILE: Setline/Info.plist
         PRODUCT_NAME: GymBlox
