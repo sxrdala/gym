@@ -59,7 +59,7 @@ jobs:
           compression-level: 0
 
   simulator-tests:
-    runs-on: macos-latest
+    runs-on: macos-15-intel
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -71,8 +71,10 @@ jobs:
 
       - name: Run journal and 4.7-inch layout tests
         run: |
-          runtime="$(xcrun simctl list runtimes --json | jq -er '
-            [.runtimes[] | select(.isAvailable and .platform == "iOS")]
+          sdk="$(xcrun --sdk iphonesimulator --show-sdk-version)"
+          runtime="$(xcrun simctl list runtimes --json | jq -er --arg sdk "$sdk" '
+            [.runtimes[] | select(.isAvailable and (.identifier | contains("SimRuntime.iOS-")))
+              | select((.version | split(".") | map(tonumber)) <= ($sdk | split(".") | map(tonumber)))]
             | sort_by(.version | split(".") | map(tonumber)) | last | .identifier')"
           device="$(xcrun simctl create "GymBlox 4.7 inch" \
             com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation "$runtime")"
